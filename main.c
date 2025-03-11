@@ -119,12 +119,7 @@ bool wifi_init_sta(void)
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
-    esp_err_t err = mdns_init();
-    if (err) {
-        printf("MDNS Init failed: %d\n", err);
-        
-    }
-    mdns_hostname_set("esp32-Chiriac");
+    
     return false;
 }
 
@@ -228,6 +223,12 @@ void app_main(void)
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     bool connected = wifi_init_sta();
+    esp_err_t err = mdns_init();
+    if (err) {
+        printf("MDNS Init failed: %d\n", err);
+        
+    }
+    mdns_hostname_set("esp32-Chiriac");
     resolve_mdns_host("esp32-Chiran");
     if (connected) {
         xTaskCreate(udp_task, "udp_task", 4096, NULL, 5, NULL);

@@ -15,24 +15,17 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include <stdio.h>
 #include "lwip/err.h"
 #include "lwip/sys.h"
-
+#include "D:\Laborator4\Lab4\mdns\include\mdns.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
-
-#include "driver/gpio.h"
-#include <lwip/inet.h>
 
 #define CONFIG_ESP_WIFI_SSID      "lab-iot"
 #define CONFIG_ESP_WIFI_PASS      "IoT-IoT-IoT"
 #define CONFIG_ESP_MAXIMUM_RETRY  5
 #define CONFIG_LOCAL_PORT         10001
-#define GPIO_OUTPUT_IO 4
-#define GPIO_OUTPUT_PIN_SEL (1ULL<<GPIO_OUTPUT_IO)
-#define CONFIG_PEER_IP_ADDR "192.168.89.32"
-#define CONFIG_PEER_PORT   10001
+
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -41,14 +34,12 @@ static EventGroupHandle_t s_wifi_event_group;
  * - we failed to connect after the maximum amount of retries */
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
-#define GPIO_BUTTON_IO 2  
-#define GPIO_BUTTON_PIN_SEL (1ULL << GPIO_BUTTON_IO)
 
 static const char *TAG = "wifi station";
 
 static int s_retry_num = 0;
-static char buff[10];
-int last_button_state = 0; 
+
+
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -128,23 +119,10 @@ bool wifi_init_sta(void)
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
+    
     return false;
 }
 
-void button_task(void *pvParameters) {
-    gpio_config_t io_conf = {};
-
-
-    io_conf.intr_type = GPIO_INTR_DISABLE;     
-    io_conf.mode = GPIO_MODE_INPUT;            
-    io_conf.pin_bit_mask = GPIO_BUTTON_PIN_SEL;  
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;     
-    io_conf.pull_down_en = 0;                    
-    gpio_config(&io_conf);
-
-    int last_button_state = 1; 
-   
-}
 static void udp_task(void *pvParameters)
 {
     char rx_buffer[128];
@@ -152,14 +130,14 @@ static void udp_task(void *pvParameters)
     int addr_family = 0;
     int ip_protocol = 0;
 
-    
+    /*
     struct sockaddr_in dest_addr;
     dest_addr.sin_addr.s_addr = inet_addr(CONFIG_PEER_IP_ADDR); // unde #define CONFIG_PEER_IP_ADDR "192.168.89.abc"
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(CONFIG_PEER_PORT);
     addr_family = AF_INET;
     ip_protocol = IPPROTO_IP;
-    
+    */
 
     struct sockaddr_in local_addr;
     local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -182,62 +160,28 @@ static void udp_task(void *pvParameters)
             ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
         }
         ESP_LOGI(TAG, "Socket bound, port %d", CONFIG_LOCAL_PORT);
-        
-        //int current_button_state = gpio_get_level(GPIO_BUTTON_IO);
-        while (gpio_get_level(GPIO_BUTTON_IO)==1)
-        {
-            last_button_state = 1 - last_button_state;
-            if( last_button_state==1)
-            {
-               strcpy(buff,"GPIO4=1");
+
+        while (1) {
+
+            struct sockaddr source_addr;
+            socklen_t socklen = sizeof(source_addr);
+            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, &source_addr, &socklen);
+
+            // Error occurred during receiving
+            if (len < 0) {
+                ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
+                break;
             }
-            else strcpy(buff,"GPIO4=0");
-            int ret=sendto(sock, buff, sizeof(buff),0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            // Data received
+            else {
+                 inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
+                rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
+                ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
+                ESP_LOGI(TAG, "%s", rx_buffer);
+            }
 
+            vTaskDelay(200 / portTICK_PERIOD_MS);
         }
-        // if (last_button_state == 1 && current_button_state == 0) {
-
-        //     buff=0;
-        //     printf("Button pressed!%d\n", buff);
-        // }
-        // else {
-        //     buff=1;
-        //     printf("Button unpressed!  %d\n", buff);
-        // }
-        
-        
-        // last_button_state = current_button_state;
-
-        // int ret=sendto(sock, buff, sizeof(buff),0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-
-        // while (1) {
-
-        //     struct sockaddr source_addr;
-        //     socklen_t socklen = sizeof(source_addr);
-        //     int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, &source_addr, &socklen);
-
-        //     // Error occurred during receiving
-        //     if (len < 0) {
-        //         ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
-        //         break;
-        //     }
-        //     // Data received
-        //     else {
-        //          inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
-        //         rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
-        //         ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
-        //         ESP_LOGI(TAG, "%s", rx_buffer);
-
-        //         if(strcmp(rx_buffer, "GPIO=1")==0){
-        //             gpio_set_level(GPIO_OUTPUT_IO, 0);
-        //         }
-        //         else if(strcmp(rx_buffer, "GPIO=0")==0){
-        //             gpio_set_level(GPIO_OUTPUT_IO, 1);
-        //         }
-        //     }
-
-        //     vTaskDelay(200 / portTICK_PERIOD_MS);
-        // }
 
         if (sock != -1) {
             ESP_LOGE(TAG, "Shutting down socket and restarting...");
@@ -247,34 +191,82 @@ static void udp_task(void *pvParameters)
     }
     vTaskDelete(NULL);
 }
+void resolve_mdns_host(const char * host_name)
+{
+    printf("Query A: %s.local", host_name);
 
+    esp_ip4_addr_t addr;
+    addr.addr = 0;
+
+    esp_err_t err = mdns_query_a(host_name, 2000,  &addr);
+    if(err){
+        if(err == ESP_ERR_NOT_FOUND){
+            printf("Host was not found!");
+            return;
+        }
+        printf("Query Failed");
+        return;
+    }
+
+    printf(IPSTR, IP2STR(&addr));
+}
+static const char * if_str[] = {"STA", "AP", "ETH", "MAX"};
+static const char * ip_protocol_str[] = {"V4", "V6", "MAX"};
+
+void mdns_print_results(mdns_result_t * results){
+    mdns_result_t * r = results;
+    mdns_ip_addr_t * a = NULL;
+    int i = 1, t;
+    while(r){
+        printf("%d:, Type: %s\n", i++, ip_protocol_str[r->ip_protocol]);
+        if(r->instance_name){
+            printf("  PTR : %s\n", r->instance_name);
+        }
+        if(r->hostname){
+            printf("  SRV : %s.local:%u\n", r->hostname, r->port);
+        }
+        if(r->txt_count){
+            printf("  TXT : [%u] ", r->txt_count);
+            for(t=0; t<r->txt_count; t++){
+                printf("%s=%s; ", r->txt[t].key, r->txt[t].value);
+            }
+            printf("\n");
+        }
+        a = r->addr;
+        while(a){
+            if(a->addr.type == IPADDR_TYPE_V6){
+                printf("  AAAA: " IPV6STR "\n", IPV62STR(a->addr.u_addr.ip6));
+            } else {
+                printf("  A   : " IPSTR "\n", IP2STR(&(a->addr.u_addr.ip4)));
+            }
+            a = a->next;
+        }
+        r = r->next;
+    }
+
+}
+
+void find_mdns_service(const char * service_name, const char * proto)
+{
+    ESP_LOGI(TAG, "Query PTR: %s.%s.local", service_name, proto);
+
+    mdns_result_t * results = NULL;
+    esp_err_t err = mdns_query_ptr(service_name, proto, 3000, 20,  &results);
+    if(err){
+        ESP_LOGE(TAG, "Query Failed");
+        return;
+    }
+    if(!results){
+        ESP_LOGW(TAG, "No results found!");
+        return;
+    }
+
+    mdns_print_results(results);
+    mdns_query_results_free(results);
+}
 void app_main(void)
 {
-
-        //Initialize NVS
-        gpio_config_t io_conf = {};
-        //disable interrupt
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        //set as output mode
-        io_conf.mode = GPIO_MODE_OUTPUT;
-        //bit mask of the pins that you want to set
-        io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-        //disable pull-down mode
-        io_conf.pull_down_en = 0;
-        //disable pull-up mode
-        io_conf.pull_up_en = 0;
-        //configure GPIO with the given settings
-        gpio_config(&io_conf);
-
-
-        io_conf.intr_type = GPIO_INTR_DISABLE;     
-        io_conf.mode = GPIO_MODE_INPUT;            
-        io_conf.pin_bit_mask = GPIO_BUTTON_PIN_SEL;  
-        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;     
-        io_conf.pull_down_en = 0;                    
-        gpio_config(&io_conf);
-
-    
+    //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -284,8 +276,28 @@ void app_main(void)
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     bool connected = wifi_init_sta();
+    esp_err_t err = mdns_init();
+    if (err) {
+        printf("MDNS Init failed: %d\n", err);
+        
+    }
+    mdns_hostname_set("esp32-Chiriac");
+    resolve_mdns_host("esp32-Chiran");
 
+    resolve_mdns_host("esp32-mdns");
+
+    //search for HTTP servers
+    find_mdns_service("_http", "_tcp");
+    //or file servers
+    find_mdns_service("_smb", "_tcp"); //windows sharing
+    find_mdns_service("_afpovertcp", "_tcp"); //apple sharing
+    find_mdns_service("_nfs", "_tcp"); //NFS server
+    find_mdns_service("_ftp", "_tcp"); //FTP server
+    //or networked printer
+    find_mdns_service("_printer", "_tcp");
+    find_mdns_service("_ipp", "_tcp");
     if (connected) {
         xTaskCreate(udp_task, "udp_task", 4096, NULL, 5, NULL);
     }
+   
 }
